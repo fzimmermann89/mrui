@@ -272,17 +272,128 @@ def get_job_volume(
         selection = tuple(batch_indices) + (slice(None), slice(None), slice(None))
         volume = np.asarray(dataset[selection])
 
-    volume = np.ascontiguousarray(volume, dtype=np.float32)
+    volume = np.ascontiguousarray(volume)
+    np_dtype = volume.dtype
+    if np_dtype == np.uint16:
+        dtype_header = "uint16"
+        endianness = "little" if volume.dtype.byteorder in ("<", "=") else "big"
+    else:
+        volume = volume.astype(np.float32, copy=False)
+        dtype_header = "float32"
+        endianness = "little"
 
     headers = {
         "X-Volume-Shape": ",".join(str(dim) for dim in volume.shape),
-        "X-Dtype": "float32",
+        "X-Dtype": dtype_header,
         "X-Order": "C",
-        "X-Endianness": "little",
+        "X-Endianness": endianness,
         "X-Batch-Index": ",".join(str(idx) for idx in batch_indices),
     }
     return Response(
         content=volume.tobytes(order="C"),
+        media_type="application/octet-stream",
+        headers=headers,
+    )
+
+
+@api_router.get(
+    "/jobs/{job_id}/slice",
+    response_class=Response,
+    operation_id="get_job_slice",
+)
+def get_job_slice(
+    job_id: str,
+    orientation: str,
+    index: int,
+    batch: str | None = None,
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    metadata_path = Path(settings.results_dir) / f"{job_id}.json"
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="job not found")
+    job = load_job(metadata_path)
+    if job.status != JobStatus.FINISHED:
+        raise HTTPException(status_code=409, detail="job not finished")
+    if not job.result_shape:
+        raise HTTPException(status_code=404, detail="result metadata missing")
+
+    valid_orientations = {"yx", "zx", "zy"}
+    if orientation not in valid_orientations:
+        raise HTTPException(status_code=400, detail="invalid orientation")
+
+    batch_dims = job.result_shape[:-3]
+    if batch_dims:
+        if batch is None:
+            batch_indices = [0] * len(batch_dims)
+        else:
+            parts = [part.strip() for part in batch.split(",") if part.strip()]
+            if len(parts) != len(batch_dims):
+                raise HTTPException(status_code=400, detail="invalid batch length")
+            try:
+                batch_indices = [int(part) for part in parts]
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="invalid batch indices") from exc
+        for idx, dim in zip(batch_indices, batch_dims, strict=True):
+            if idx < 0 or idx >= dim:
+                raise HTTPException(status_code=400, detail="batch index out of range")
+    else:
+        batch_indices = []
+
+    z_size, y_size, x_size = job.result_shape[-3:]
+    if orientation == "yx":
+        max_index = z_size
+    elif orientation == "zx":
+        max_index = y_size
+    else:
+        max_index = x_size
+
+    if index < 0 or index >= max_index:
+        raise HTTPException(status_code=400, detail="slice index out of range")
+
+    result_file = Path(settings.results_dir) / f"{job_id}.h5"
+    if not result_file.exists():
+        raise HTTPException(status_code=404, detail="result missing")
+
+    with h5py.File(result_file, "r") as handle:
+        dataset = handle[job.result_dataset]
+        if not isinstance(dataset, h5py.Dataset):
+            raise HTTPException(status_code=404, detail="result dataset missing")
+
+        prefix = tuple(batch_indices)
+        if orientation == "yx":
+            selection = prefix + (index, slice(None), slice(None))
+        elif orientation == "zx":
+            selection = prefix + (slice(None), index, slice(None))
+        else:
+            selection = prefix + (slice(None), slice(None), index)
+
+        slice_data = np.asarray(dataset[selection])
+
+    if slice_data.ndim != 2:
+        raise HTTPException(status_code=500, detail="slice extraction failed")
+
+    np_dtype = slice_data.dtype
+    if np_dtype == np.uint16:
+        dtype_header = "uint16"
+        endianness = "little" if slice_data.dtype.byteorder in ("<", "=") else "big"
+        payload = np.ascontiguousarray(slice_data)
+    else:
+        payload = np.ascontiguousarray(slice_data, dtype=np.float32)
+        dtype_header = "float32"
+        endianness = "little"
+
+    headers = {
+        "X-Slice-Shape": ",".join(str(dim) for dim in payload.shape),
+        "X-Dtype": dtype_header,
+        "X-Order": "C",
+        "X-Endianness": endianness,
+        "X-Batch-Index": ",".join(str(idx) for idx in batch_indices),
+        "X-Orientation": orientation,
+        "X-Slice-Index": str(index),
+    }
+
+    return Response(
+        content=payload.tobytes(order="C"),
         media_type="application/octet-stream",
         headers=headers,
     )

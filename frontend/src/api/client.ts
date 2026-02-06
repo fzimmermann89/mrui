@@ -8,6 +8,16 @@ import type {
   DownloadFormat,
 } from "@/types";
 
+export interface SliceMetadata {
+  shape: [number, number];
+  dtype: "float32" | "uint16";
+  order: string;
+  endianness: string;
+  batchIndex: number[];
+  orientation: "yx" | "zx" | "zy";
+  sliceIndex: number;
+}
+
 const API_BASE = "/api";
 
 // Fetch all jobs
@@ -65,7 +75,7 @@ async function deleteJob(jobId: string): Promise<void> {
 export async function fetchVolume(
   jobId: string,
   batchIndices: number[]
-): Promise<{ data: Float32Array; metadata: VolumeMetadata }> {
+): Promise<{ data: Float32Array | Uint16Array; metadata: VolumeMetadata }> {
   const batchParam = batchIndices.length > 0 ? batchIndices.join(",") : "";
   const url = `${API_BASE}/jobs/${jobId}/volume${batchParam ? `?batch=${batchParam}` : ""}`;
 
@@ -82,7 +92,7 @@ export async function fetchVolume(
   const batchIndexHeader = res.headers.get("X-Batch-Index") || "";
 
   const buffer = await res.arrayBuffer();
-  const data = new Float32Array(buffer);
+  const data = dtype === "uint16" ? new Uint16Array(buffer) : new Float32Array(buffer);
 
   const metadata: VolumeMetadata = {
     shape: shapeHeader.split(",").map(Number).filter((n) => !isNaN(n)),
@@ -93,6 +103,64 @@ export async function fetchVolume(
       .split(",")
       .map(Number)
       .filter((n) => !isNaN(n)),
+  };
+
+  return { data, metadata };
+}
+
+export async function fetchSlice(
+  jobId: string,
+  orientation: "yx" | "zx" | "zy",
+  index: number,
+  batchIndices: number[],
+  signal?: AbortSignal
+): Promise<{ data: Float32Array | Uint16Array; metadata: SliceMetadata }> {
+  const params = new URLSearchParams();
+  params.set("orientation", orientation);
+  params.set("index", String(index));
+  if (batchIndices.length > 0) {
+    params.set("batch", batchIndices.join(","));
+  }
+  const url = `${API_BASE}/jobs/${jobId}/slice?${params.toString()}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    if (res.status === 409) throw new Error("Job not finished");
+    throw new Error("Failed to fetch slice");
+  }
+
+  const shapeHeader = res.headers.get("X-Slice-Shape") || "";
+  const dtypeHeader = (res.headers.get("X-Dtype") || "float32") as
+    | "float32"
+    | "uint16";
+  const order = res.headers.get("X-Order") || "C";
+  const endianness = res.headers.get("X-Endianness") || "little";
+  const batchIndexHeader = res.headers.get("X-Batch-Index") || "";
+  const orientationHeader = (res.headers.get("X-Orientation") || "yx") as
+    | "yx"
+    | "zx"
+    | "zy";
+  const sliceIndexHeader = parseInt(res.headers.get("X-Slice-Index") || "0", 10);
+
+  const shape = shapeHeader.split(",").map(Number).filter((n) => !isNaN(n));
+  if (shape.length !== 2) {
+    throw new Error("Invalid slice shape header");
+  }
+
+  const buffer = await res.arrayBuffer();
+  const data =
+    dtypeHeader === "uint16" ? new Uint16Array(buffer) : new Float32Array(buffer);
+
+  const metadata: SliceMetadata = {
+    shape: [shape[0], shape[1]],
+    dtype: dtypeHeader,
+    order,
+    endianness,
+    batchIndex: batchIndexHeader
+      .split(",")
+      .map(Number)
+      .filter((n) => !isNaN(n)),
+    orientation: orientationHeader,
+    sliceIndex: Number.isFinite(sliceIndexHeader) ? sliceIndexHeader : index,
   };
 
   return { data, metadata };

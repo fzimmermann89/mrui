@@ -69,15 +69,15 @@ export function JobDetail({ jobId }: JobDetailProps) {
   if (isLoading) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-[var(--color-muted-foreground)]" />
+        <Loader2 className="h-5 w-5 animate-spin text-[var(--color-muted-foreground)]" />
       </div>
     );
   }
 
   if (error || !job) {
     return (
-      <div className="h-full flex items-center justify-center text-[var(--color-destructive)]">
-        <AlertCircle className="h-5 w-5 mr-2" />
+      <div className="h-full flex items-center justify-center text-[var(--color-destructive)] gap-2 text-sm">
+        <AlertCircle className="h-4 w-4" />
         Failed to load job
       </div>
     );
@@ -95,7 +95,6 @@ export function JobDetail({ jobId }: JobDetailProps) {
   const algorithmDescription = algorithmInfo?.description;
   const algorithmUI = ALGORITHM_UI[job.algorithm];
   const paramRows = algorithmUI?.describeParams?.(job.params) ?? describeParams(job.params);
-  const paramSummary = paramRows.map((row) => row.value).join(" · ");
 
   const date = new Date(job.created_at);
   const timeStr = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -107,66 +106,63 @@ export function JobDetail({ jobId }: JobDetailProps) {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="shrink-0 h-12 px-4 border-b border-[var(--color-border)] flex items-center gap-3">
-        <div className="flex items-center gap-2.5 min-w-0 flex-1">
-          <h2 className="text-[13px] font-semibold truncate leading-none">
-            {job.name}
-          </h2>
+      {/* Compact header - single line on desktop */}
+      <div className="shrink-0 h-10 px-3 border-b border-[var(--color-border)] flex items-center gap-2">
+        {/* Status dot */}
+        <span
+          className="status-dot-inline"
+          style={{ backgroundColor: statusColor }}
+          title={statusLabel}
+        />
 
-          <TooltipProvider delayDuration={200}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  className="shrink-0 max-w-[140px] px-1.5 py-0.5 text-[10px] font-medium tracking-wide bg-[var(--color-muted)] text-[var(--color-muted-foreground)] rounded cursor-default truncate"
-                  title={paramSummary || undefined}
-                >
-                  {algorithmName}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                <div className="space-y-1.5">
-                  <p className="font-semibold">{algorithmName}</p>
-                  {algorithmDescription && (
-                    <p className="text-[var(--color-muted-foreground)]">
-                      {algorithmDescription}
-                    </p>
-                  )}
-                  {paramRows.length > 0 ? (
-                    <div className="space-y-1">
-                      {paramRows.map((row) => (
-                        <div key={row.label} className="flex items-center gap-3">
-                          <span className="text-[var(--color-muted-foreground)]">
-                            {row.label}
-                          </span>
-                          <span className="font-mono">{row.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[var(--color-muted-foreground)]">No parameters</p>
-                  )}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+        {/* Job name */}
+        <h2 className="text-sm font-medium truncate min-w-0 flex-shrink">
+          {job.name}
+        </h2>
 
-        <div className="flex items-center gap-4 text-[11px] text-[var(--color-muted-foreground)]">
-          <div className="flex items-center gap-1.5">
-            <span
-              className="w-1.5 h-1.5 rounded-full shrink-0"
-              style={{ backgroundColor: statusColor }}
-            />
-            <span className="font-medium" style={{ color: statusColor }}>
-              {statusLabel}
-            </span>
-          </div>
+        {/* Algorithm badge with tooltip */}
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="algo-badge shrink-0 cursor-default">
+                {algorithmName}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs max-w-[260px]">
+              <div className="space-y-1">
+                <p className="font-medium">{algorithmName}</p>
+                {algorithmDescription && (
+                  <p className="text-[var(--color-muted-foreground)] text-[11px]">
+                    {algorithmDescription}
+                  </p>
+                )}
+                {paramRows.length > 0 && (
+                  <div className="space-y-0.5 pt-1 mt-1 border-t border-[var(--color-border)]">
+                    {paramRows.map((row) => (
+                      <div key={row.label} className="flex items-center justify-between gap-2 text-[11px]">
+                        <span className="text-[var(--color-muted-foreground)]">{row.label}</span>
+                        <span className="font-mono">{row.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
 
-          <span className="tabular-nums">
-            {dateStr} · {timeStr}
-          </span>
+        {/* Separator */}
+        <span className="text-[var(--color-border)] tablet-up">·</span>
 
-          {job.input_filename && (
+        {/* Date/time - desktop only */}
+        <span className="text-[11px] text-[var(--color-muted-foreground)] tabular-nums font-mono shrink-0 tablet-up">
+          {dateStr} {timeStr}
+        </span>
+
+        {/* Input file - desktop only */}
+        {job.input_filename && (
+          <>
+            <span className="text-[var(--color-border)] desktop-only">·</span>
             <TooltipProvider delayDuration={200}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -174,17 +170,17 @@ export function JobDetail({ jobId }: JobDetailProps) {
                     <a
                       href={getInputDownloadUrl(jobId)}
                       download
-                      className="flex items-center gap-1 hover:text-[var(--color-foreground)] transition-colors text-[var(--color-foreground)]"
+                      className="desktop-only flex items-center gap-1 text-[11px] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] transition-colors"
                     >
                       <FileText className="w-3 h-3" />
-                      <span className="max-w-[120px] truncate font-mono text-[10px] underline decoration-dotted decoration-[var(--color-border)] underline-offset-2">
+                      <span className="max-w-[100px] truncate font-mono">
                         {job.input_filename}
                       </span>
                     </a>
                   ) : (
-                    <span className="flex items-center gap-1 cursor-not-allowed opacity-50">
+                    <span className="desktop-only flex items-center gap-1 text-[11px] text-[var(--color-muted-foreground)] opacity-50 cursor-not-allowed">
                       <FileText className="w-3 h-3" />
-                      <span className="max-w-[120px] truncate font-mono text-[10px]">
+                      <span className="max-w-[100px] truncate font-mono">
                         {job.input_filename}
                       </span>
                     </span>
@@ -192,24 +188,28 @@ export function JobDetail({ jobId }: JobDetailProps) {
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="font-mono text-xs">
                   {job.input_filename}
-                  {!job.input_available && " (Not available)"}
+                  {!job.input_available && " (unavailable)"}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-          )}
-        </div>
+          </>
+        )}
 
-        <div className="flex items-center gap-2">
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Actions - right aligned */}
+        <div className="flex items-center gap-1 shrink-0">
           {(isFinished || isFailed) && logs && (
             <Button
               variant={showLogs ? "secondary" : "ghost"}
               size="sm"
               onClick={() => setShowLogs(!showLogs)}
-              className="h-7 px-2 gap-1 text-[11px] font-medium"
+              className="h-6 px-2 text-[11px] font-medium gap-1"
               title="Toggle Logs"
             >
-              <ScrollText className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logs</span>
+              <ScrollText className="w-3 h-3" />
+              <span className="tablet-up">Logs</span>
             </Button>
           )}
 
@@ -219,28 +219,22 @@ export function JobDetail({ jobId }: JobDetailProps) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 px-2 gap-1 text-[11px] font-medium text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
+                  className="h-6 px-2 text-[11px] font-medium gap-1 text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)]"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  Export
-                  <ChevronDown className="w-3 h-3 opacity-50" />
+                  <Download className="w-3 h-3" />
+                  <span className="tablet-up">Export</span>
+                  <ChevronDown className="w-2.5 h-2.5 opacity-50" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-[120px]">
+              <DropdownMenuContent align="end" className="min-w-[100px]">
                 <DropdownMenuItem asChild className="text-xs">
-                  <a href={getDownloadUrl(jobId, "h5")} download>
-                    HDF5 (.h5)
-                  </a>
+                  <a href={getDownloadUrl(jobId, "h5")} download>HDF5</a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild className="text-xs">
-                  <a href={getDownloadUrl(jobId, "npy")} download>
-                    NumPy (.npy)
-                  </a>
+                  <a href={getDownloadUrl(jobId, "npy")} download>NumPy</a>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild className="text-xs">
-                  <a href={getDownloadUrl(jobId, "nii")} download>
-                    NIfTI (.nii)
-                  </a>
+                  <a href={getDownloadUrl(jobId, "nii")} download>NIfTI</a>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -248,10 +242,11 @@ export function JobDetail({ jobId }: JobDetailProps) {
         </div>
       </div>
 
+      {/* Content area */}
       <div className="flex-1 overflow-hidden relative">
         {showLogs ? (
-          <div className="absolute inset-0 bg-[var(--color-background)] z-10 p-4 overflow-auto">
-            <pre className="text-[11px] font-mono whitespace-pre-wrap break-all text-[var(--color-foreground)]">
+          <div className="absolute inset-0 bg-[var(--color-background)] z-10 p-3 overflow-auto">
+            <pre className="text-[11px] font-mono whitespace-pre-wrap break-all text-[var(--color-foreground)] leading-relaxed">
               {logs}
             </pre>
           </div>
@@ -260,35 +255,33 @@ export function JobDetail({ jobId }: JobDetailProps) {
         {!showLogs && isFinished && hasResult && job.result_shape ? (
           <VolumeViewer jobId={jobId} resultShape={job.result_shape} />
         ) : !showLogs && isFinished && !hasResult ? (
-          <div className="h-full flex flex-col items-center justify-center text-[var(--color-muted-foreground)]">
-            <AlertCircle className="h-8 w-8 mb-3 opacity-50" />
+          <div className="h-full flex flex-col items-center justify-center text-[var(--color-muted-foreground)] gap-2">
+            <AlertCircle className="h-6 w-6 opacity-40" />
             <p className="text-sm font-medium">Result missing</p>
-            <p className="text-xs mt-1 opacity-70">The result files are no longer available.</p>
+            <p className="text-xs opacity-60">Files no longer available</p>
           </div>
         ) : !showLogs && isProcessing ? (
-          <div className="h-full flex flex-col items-center justify-center text-[var(--color-muted-foreground)]">
-            <Loader2 className="h-8 w-8 animate-spin mb-3" />
-            <p className="text-sm">Processing reconstruction...</p>
+          <div className="h-full flex flex-col items-center justify-center text-[var(--color-muted-foreground)] gap-2">
+            <Loader2 className="h-6 w-6 animate-spin" />
+            <p className="text-sm">Processing...</p>
           </div>
         ) : !showLogs && isFailed ? (
-          <div className="h-full flex flex-col items-center justify-center text-[var(--color-destructive)] p-8">
-            <AlertCircle className="h-8 w-8 mb-3 shrink-0" />
-            <p className="text-sm font-medium mb-4 shrink-0">
+          <div className="h-full flex flex-col items-center justify-center text-[var(--color-destructive)] p-6 gap-2">
+            <AlertCircle className="h-6 w-6" />
+            <p className="text-sm font-medium">
               Reconstruction {job.status}
             </p>
             {job.error && (
-              <div className="w-full max-w-3xl bg-destructive/5 rounded-md border border-destructive/20 overflow-hidden shrink min-h-0 flex flex-col">
-                <div className="p-4 overflow-auto">
-                  <pre className="text-xs font-mono whitespace-pre-wrap break-all text-destructive">
-                    {job.error}
-                  </pre>
-                </div>
+              <div className="w-full max-w-2xl mt-2 bg-[var(--color-destructive)]/5 rounded border border-[var(--color-destructive)]/20 p-3 overflow-auto max-h-[50vh]">
+                <pre className="text-xs font-mono whitespace-pre-wrap break-all text-[var(--color-destructive)]">
+                  {job.error}
+                </pre>
               </div>
             )}
           </div>
         ) : !showLogs ? (
           <div className="h-full flex items-center justify-center text-[var(--color-muted-foreground)]">
-            <p className="text-sm">Waiting in queue... ({status.label})</p>
+            <p className="text-sm">Waiting in queue...</p>
           </div>
         ) : null}
       </div>

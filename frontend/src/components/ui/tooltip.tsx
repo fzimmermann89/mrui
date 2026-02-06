@@ -17,7 +17,11 @@ const TooltipContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       className={cn(
-        "z-50 overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-popover)] px-3 py-1.5 text-sm text-[var(--color-popover-foreground)] shadow-[var(--shadow-md)] animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "z-50 overflow-hidden rounded-[var(--radius-md)] border px-2.5 py-1.5 text-xs shadow-md animate-in fade-in-0 zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "bg-[#18181b] text-[#fafafa] border-[#3f3f46]",
+        "dark:bg-[#18181b] dark:text-[#fafafa] dark:border-[#3f3f46]",
+        "[.light_&]:bg-[#fafafa] [.light_&]:text-[#09090b] [.light_&]:border-[#e4e4e7]",
+        "[[data-theme=light]_&]:bg-[#fafafa] [[data-theme=light]_&]:text-[#09090b] [[data-theme=light]_&]:border-[#e4e4e7]",
         className
       )}
       {...props}
