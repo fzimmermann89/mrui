@@ -205,24 +205,20 @@ export function ReglCanvas({
     if (!Number.isInteger(width) || !Number.isInteger(height)) return;
     if (canvas.width === 0 || canvas.height === 0) return;
 
-    try {
-      if (sliceTextureRef.current) {
-        sliceTextureRef.current.destroy();
-        sliceTextureRef.current = null;
-      }
-      sliceTextureRef.current = regl.texture({
-        width,
-        height,
-        data: sliceData,
-        format: "luminance",
-        type: "float",
-        min: "nearest",
-        mag: "nearest",
-        wrap: "clamp",
-      });
-    } catch (error) {
-      throw error;
+    if (sliceTextureRef.current) {
+      sliceTextureRef.current.destroy();
+      sliceTextureRef.current = null;
     }
+    sliceTextureRef.current = regl.texture({
+      width,
+      height,
+      data: sliceData,
+      format: "luminance",
+      type: "float",
+      min: "nearest",
+      mag: "nearest",
+      wrap: "clamp",
+    });
 
     // Render
     const containerAspect = canvas.width / canvas.height || 1;

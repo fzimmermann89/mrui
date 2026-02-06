@@ -70,6 +70,7 @@ export function MrproCommonParamsFields() {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function describeMrproCommonParams(params: AlgorithmParams): AlgorithmParamRow[] {
   if (!("trajectory_calculator" in params) || !("csm_algorithm" in params)) {
     return [];

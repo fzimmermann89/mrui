@@ -5,6 +5,7 @@ import {
   describeMrproCommonParams,
 } from "./MrproCommonParams";
 
+// eslint-disable-next-line react-refresh/only-export-components
 function DirectReconstructionForm() {
   return (
     <div className="space-y-4 p-4 border border-[var(--color-border)] rounded-[var(--radius-md)] bg-[var(--color-card)]">

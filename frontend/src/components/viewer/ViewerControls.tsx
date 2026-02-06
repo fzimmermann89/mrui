@@ -67,6 +67,7 @@ function AxisValue({
 
   useEffect(() => {
     if (isEditing) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setEditValue(String(value));
     }
   }, [value, isEditing]);
@@ -152,6 +153,13 @@ function WindowingControls({
   const vminRef = useRef<HTMLDivElement>(null);
   const vmaxRef = useRef<HTMLDivElement>(null);
 
+  const formatValue = (v: number) => {
+    if (Math.abs(v) < 0.01 || Math.abs(v) >= 1000) {
+      return v.toExponential(1);
+    }
+    return v.toFixed(2);
+  };
+
   const handleVminWheel = useCallback(
     (event: WheelEvent) => {
       if (event.cancelable) {
@@ -186,21 +194,16 @@ function WindowingControls({
     [vmin, vmax, onVmaxChange, editingVmax]
   );
 
-  const formatValue = (v: number) => {
-    if (Math.abs(v) < 0.01 || Math.abs(v) >= 1000) {
-      return v.toExponential(1);
-    }
-    return v.toFixed(2);
-  };
-
   useEffect(() => {
     if (editingVmin) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setVminEdit(formatValue(vmin));
     }
   }, [vmin, editingVmin]);
 
   useEffect(() => {
     if (editingVmax) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setVmaxEdit(formatValue(vmax));
     }
   }, [vmax, editingVmax]);

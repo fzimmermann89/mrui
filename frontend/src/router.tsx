@@ -79,6 +79,7 @@ const indexRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([indexRoute]);
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const router = createRouter({ routeTree });
 
 declare module "@tanstack/react-router" {

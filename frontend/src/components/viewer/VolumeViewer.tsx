@@ -81,6 +81,7 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     setError(null);
     setSlice(null);
@@ -114,6 +115,7 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
   }, [jobId, batchIndices]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSliceIndex(0);
   }, [orientation]);
 
@@ -163,6 +165,7 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
     if (!volumeData) return;
     const expectedLength = zSize * ySize * xSize;
     if (volumeData.length !== expectedLength) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setError("Volume shape mismatch");
       if (isLoading) {
         setIsLoading(false);

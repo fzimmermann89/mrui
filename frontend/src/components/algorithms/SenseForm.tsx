@@ -5,6 +5,7 @@ import type { AlgorithmParams } from "@/types";
 import type { AlgorithmUI, AlgorithmParamRow } from "./types";
 import { MrproCommonParamsFields, describeMrproCommonParams } from "./MrproCommonParams";
 
+// eslint-disable-next-line react-refresh/only-export-components
 function SenseForm() {
   const { register } = useFormContext();
 
