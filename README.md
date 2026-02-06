@@ -15,6 +15,17 @@ uv run prod
 
 Then open http://localhost:5173 (dev) or http://localhost:8000 (prod).
 
+<table>
+  <tr>
+    <td><img src=".github/new_job.png" height="280" alt="New job" /></td>
+    <td><img src=".github/result.png" height="280" alt="Result" /></td>
+  </tr>
+  <tr>
+    <td align="center">New job</td>
+    <td align="center">Result</td>
+  </tr>
+</table>
+
 ## How it works
 
 You POST a file to `/api/jobs` with algorithm parameters. The backend:
