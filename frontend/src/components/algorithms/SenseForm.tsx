@@ -13,7 +13,7 @@ function SenseForm() {
     <div className="space-y-4 p-4 border border-[var(--color-border)] rounded-[var(--radius-md)] bg-[var(--color-card)]">
       <MrproCommonParamsFields />
 
-      <div className="space-y-1.5">
+      {/* <div className="space-y-1.5">
         <Label htmlFor="regularization">Regularization</Label>
         <Input
           id="regularization"
@@ -25,7 +25,7 @@ function SenseForm() {
         <p className="text-xs text-[var(--color-muted-foreground)]">
           Tikhonov regularization parameter (lambda)
         </p>
-      </div>
+      </div> */}
 
       <div className="space-y-1.5">
         <Label htmlFor="iterations">Iterations</Label>
@@ -49,7 +49,7 @@ function describeSenseParams(params: AlgorithmParams): AlgorithmParamRow[] {
   if (params.algorithm !== "sense") return [];
   return [
     ...describeMrproCommonParams(params),
-    { label: "Regularization", value: `${params.regularization}` },
+    // { label: "Regularization", value: `${params.regularization}` },
     { label: "Iterations", value: `${params.iterations}` },
   ];
 }

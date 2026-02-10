@@ -108,6 +108,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/jobs/{job_id}/window-stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Window Stats */
+        get: operations["get_window_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/jobs/{job_id}/abort": {
         parameters: {
             query?: never;
@@ -323,11 +340,6 @@ export interface components {
              */
             algorithm: "sense";
             /**
-             * Regularization
-             * @default 0.01
-             */
-            regularization: number;
-            /**
              * Iterations
              * @default 10
              */
@@ -350,6 +362,13 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WindowStatsResponse */
+        WindowStatsResponse: {
+            /** P01 */
+            p01: number;
+            /** P99 */
+            p99: number;
         };
     };
     responses: never;
@@ -565,6 +584,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_window_stats: {
+        parameters: {
+            query?: {
+                batch?: string | null;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WindowStatsResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
