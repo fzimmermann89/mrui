@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import createREGL from "regl";
 import type { ColormapName } from "./colormaps";
 import { getColormapLut } from "./colormaps";
 import { getFittedRect, screenToUv } from "./transform";
+import { overrideContextType } from "../../utils/regl-webgl2-compat";
 
 interface ReglCanvasProps {
-  sliceData: Float32Array | Uint16Array;
+  sliceData: Float32Array;
   width: number;
   height: number;
-  sliceDtype: "float32" | "uint16";
   sliceIndex: number;
   vmin: number;
   vmax: number;
@@ -29,7 +29,6 @@ export function ReglCanvas({
   sliceData,
   width,
   height,
-  sliceDtype,
   sliceIndex,
   vmin,
   vmax,
@@ -49,12 +48,11 @@ export function ReglCanvas({
   const sliceTextureSpecRef = useRef<{
     width: number;
     height: number;
-    sliceDtype: "float32" | "uint16";
     regl: ReturnType<typeof createREGL>;
   } | null>(null);
   const canvasSizeRef = useRef({ width: 0, height: 0 });
-  const [canvasVersion, setCanvasVersion] = useState(0);
-  const [reglVersion, setReglVersion] = useState(0);
+  const vminRef = useRef(vmin);
+  const vmaxRef = useRef(vmax);
 
   const tooltipRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<{ x: number; y: number; visible: boolean }>({
@@ -68,27 +66,19 @@ export function ReglCanvas({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const regl = createREGL({
-      canvas,
-      attributes: {
-        antialias: false,
-        preserveDrawingBuffer: false,
-      },
-      optionalExtensions: ["OES_texture_float"],
-    });
+    const regl = overrideContextType(canvas, () =>
+      createREGL({
+        canvas,
+        attributes: {
+          antialias: false,
+          preserveDrawingBuffer: false,
+        },
+        extensions: ["OES_texture_float"],
+        optionalExtensions: ["oes_vertex_array_object", "angle_instanced_arrays"],
+      }),
+    );
 
     reglRef.current = regl;
-    setReglVersion((v) => v + 1);
-    colormapTextureRef.current = regl.texture({
-      width: 256,
-      height: 1,
-      data: getColormapLut(colormap),
-      format: "rgba",
-      type: "uint8",
-      min: "linear",
-      mag: "linear",
-      wrap: "clamp",
-    });
 
     drawRef.current = regl({
       vert: `
@@ -156,8 +146,6 @@ export function ReglCanvas({
       if (frameRef.current !== null) {
         cancelAnimationFrame(frameRef.current);
       }
-      // regl.destroy() cleans up all textures and resources automatically
-      // Do NOT manually destroy textures before this - causes double destroy
       regl.destroy();
       sliceTextureRef.current = null;
       colormapTextureRef.current = null;
@@ -168,9 +156,10 @@ export function ReglCanvas({
   }, []);
 
   useEffect(() => {
-    const colormapTexture = colormapTextureRef.current;
-    if (!colormapTexture) return;
-    colormapTexture({
+    const regl = reglRef.current;
+    if (!regl) return;
+    const texture = colormapTextureRef.current;
+    const nextData = {
       width: 256,
       height: 1,
       data: getColormapLut(colormap),
@@ -179,8 +168,44 @@ export function ReglCanvas({
       min: "linear",
       mag: "linear",
       wrap: "clamp",
-    });
+    } as const;
+    if (texture) {
+      texture(nextData);
+    } else {
+      colormapTextureRef.current = regl.texture(nextData);
+    }
   }, [colormap]);
+
+  useEffect(() => {
+    vminRef.current = vmin;
+    vmaxRef.current = vmax;
+  }, [vmin, vmax]);
+
+  const drawScene = useCallback(() => {
+    const regl = reglRef.current;
+    const draw = drawRef.current;
+    const colormapTexture = colormapTextureRef.current;
+    const sliceTexture = sliceTextureRef.current;
+    const canvas = canvasRef.current;
+
+    if (!regl || !draw || !colormapTexture || !sliceTexture || !canvas) return;
+    if (width <= 0 || height <= 0) return;
+
+    const containerAspect = canvas.width / canvas.height || 1;
+    const aspectRatio = width / height;
+
+    regl.poll();
+    regl.clear({ color: [0, 0, 0, 0] });
+
+    draw({
+      sliceTexture,
+      colormapTexture,
+      vmin: vminRef.current,
+      vmax: vmaxRef.current,
+      aspectRatio,
+      containerAspect,
+    });
+  }, [width, height]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -204,21 +229,17 @@ export function ReglCanvas({
         canvas.height = nextHeight;
         canvas.style.width = `${cw}px`;
         canvas.style.height = `${ch}px`;
-        setCanvasVersion((value) => value + 1);
+        drawScene();
       }
     });
 
     resizeObserver.observe(container);
     return () => resizeObserver.disconnect();
-  }, []);
+  }, [drawScene]);
 
   useEffect(() => {
     const regl = reglRef.current;
-    const draw = drawRef.current;
-    const colormapTexture = colormapTextureRef.current;
-    const canvas = canvasRef.current;
-
-    if (!regl || !draw || !colormapTexture || !canvas) return;
+    if (!regl) return;
     if (width <= 0 || height <= 0) return;
     if (sliceData.length !== width * height) return;
     const maxSize = regl.limits.maxTextureSize;
@@ -226,18 +247,12 @@ export function ReglCanvas({
     if (width > maxSize || height > maxSize) return;
 
     const previousSpec = sliceTextureSpecRef.current;
-    const nextSpec = { width, height, sliceDtype, regl };
+    const nextSpec = { width, height, regl };
 
-    // Check if texture needs recreation (context changed or dimensions changed)
     const contextChanged = !previousSpec || previousSpec.regl !== regl;
     if (contextChanged) {
       sliceTextureRef.current = null;
     }
-    const needsAllocate =
-      contextChanged ||
-      previousSpec.width !== width ||
-      previousSpec.height !== height ||
-      previousSpec.sliceDtype !== sliceDtype;
 
     if (!sliceTextureRef.current || contextChanged) {
       sliceTextureRef.current = regl.texture({
@@ -250,19 +265,6 @@ export function ReglCanvas({
         mag: "nearest",
         wrap: "clamp",
       });
-      sliceTextureSpecRef.current = nextSpec;
-    } else if (needsAllocate) {
-      sliceTextureRef.current({
-        width,
-        height,
-        data: sliceData,
-        format: "luminance",
-        type: "float",
-        min: "nearest",
-        mag: "nearest",
-        wrap: "clamp",
-      });
-      sliceTextureSpecRef.current = nextSpec;
     } else {
       sliceTextureRef.current({
         width,
@@ -275,33 +277,13 @@ export function ReglCanvas({
         wrap: "clamp",
       });
     }
+    sliceTextureSpecRef.current = nextSpec;
+    drawScene();
+  }, [sliceData, width, height, drawScene]);
 
-    const containerAspect = canvas.width / canvas.height || 1;
-    const aspectRatio = width / height;
-
-    regl.poll();
-    regl.clear({ color: [0, 0, 0, 0] });
-    if (!sliceTextureRef.current) return;
-
-    draw({
-      sliceTexture: sliceTextureRef.current,
-      colormapTexture,
-      vmin,
-      vmax,
-      aspectRatio,
-      containerAspect,
-    });
-  }, [
-    sliceData,
-    width,
-    height,
-    sliceDtype,
-    vmin,
-    vmax,
-    colormap,
-    canvasVersion,
-    reglVersion,
-  ]);
+  useEffect(() => {
+    drawScene();
+  }, [vmin, vmax, colormap, width, height, drawScene]);
 
   const scheduleOverlayUpdate = () => {
     if (frameRef.current !== null) return;
@@ -366,10 +348,18 @@ export function ReglCanvas({
     scheduleOverlayUpdate();
   };
 
-  const handleWheel = (event: React.WheelEvent<HTMLCanvasElement>) => {
-    event.preventDefault();
-    onWheelSlice(event.deltaY > 0 ? 1 : -1);
-  };
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      onWheelSlice(event.deltaY > 0 ? 1 : -1);
+    };
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      canvas.removeEventListener("wheel", handleWheel);
+    };
+  }, [onWheelSlice]);
 
   return (
     <div
@@ -382,7 +372,6 @@ export function ReglCanvas({
         ref={canvasRef}
         className="h-full w-full block"
         style={{ touchAction: "none" }}
-        onWheel={handleWheel}
       />
       <div
         ref={tooltipRef}

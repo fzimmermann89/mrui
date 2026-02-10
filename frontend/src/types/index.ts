@@ -23,8 +23,7 @@ export type Orientation = "zy" | "zx" | "yx";
 
 export interface VolumeMetadata {
   shape: number[];
-  dtype: string;
+  dtype: "float32";
   order: string;
-  endianness: string;
   batchIndex: number[];
 }

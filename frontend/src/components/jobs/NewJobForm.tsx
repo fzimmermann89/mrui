@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { useForm, FormProvider } from "react-hook-form";
+import { useForm, FormProvider, useWatch } from "react-hook-form";
 import { Upload, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,16 +56,19 @@ export function NewJobForm({ onSuccess }: NewJobFormProps) {
     },
   });
 
-  const { register, handleSubmit, setValue, getValues, watch } = methods;
+  const { register, handleSubmit, setValue, getValues } = methods;
 
-  const algorithms: AlgorithmInfo[] = algorithmsData?.algorithms ?? [];
+  const algorithms: AlgorithmInfo[] = useMemo(
+    () => algorithmsData?.algorithms ?? [],
+    [algorithmsData]
+  );
   const algorithmsById = useMemo(
     () => new Map(algorithms.map((alg) => [alg.id, alg])),
     [algorithms]
   );
 
-  const selectedAlgorithm = watch("algorithm");
-  const selectedParams = watch("params");
+  const selectedAlgorithm = useWatch({ control: methods.control, name: "algorithm" });
+  const selectedParams = useWatch({ control: methods.control, name: "params" });
   const algorithmInfo = algorithmsById.get(selectedAlgorithm);
   const algorithmUI = selectedAlgorithm ? ALGORITHM_UI[selectedAlgorithm] : undefined;
   const AlgorithmComponent = algorithmUI?.Form;
@@ -86,28 +89,18 @@ export function NewJobForm({ onSuccess }: NewJobFormProps) {
     }
   }, [algorithms, algorithmsById, getValues, setValue]);
 
-  useEffect(() => {
-    if (isPulseqSelected(selectedParams)) return;
-    if (pulseqFile) {
-      setPulseqFile(null);
-    }
-    if (selectedParams && "pulseq_filename" in selectedParams && selectedParams.pulseq_filename) {
-      setValue("params.pulseq_filename", null, { shouldDirty: true });
-    }
-  }, [pulseqFile, selectedParams, setValue]);
-
   const handleFileChange = useCallback(
     (selectedFile: File | null) => {
       setFile(selectedFile);
       if (selectedFile) {
         const nameWithoutExt = selectedFile.name.replace(/\.[^/.]+$/, "");
-        const currentName = watch("name");
+        const currentName = getValues("name");
         if (!currentName) {
           setValue("name", nameWithoutExt);
         }
       }
     },
-    [setValue, watch]
+    [getValues, setValue]
   );
 
   const handleAlgorithmChange = useCallback(
@@ -176,8 +169,11 @@ export function NewJobForm({ onSuccess }: NewJobFormProps) {
     }
 
     const fallbackParams = algorithmsById.get(data.algorithm)?.default_params;
-    const params = data.params ?? fallbackParams;
+    let params = data.params ?? fallbackParams;
     if (!params) return;
+    if (!isPulseqSelected(params) && "pulseq_filename" in params && params.pulseq_filename) {
+      params = { ...params, pulseq_filename: null };
+    }
 
     formData.append("params", JSON.stringify(params));
 

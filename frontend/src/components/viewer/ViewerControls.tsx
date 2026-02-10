@@ -114,10 +114,6 @@ function AxisChip({
   );
 
   useEffect(() => {
-    if (isEditing) setEditValue(String(value));
-  }, [value, isEditing]);
-
-  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     container.addEventListener("wheel", handleWheel, { passive: false });
@@ -422,7 +418,6 @@ export function ViewerControls({
 }: ViewerControlsProps) {
   return (
     <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 px-4 py-2.5 rounded-xl glass-panel">
-      {/* Orientation toggle group */}
       <div className="flex items-center gap-0.5 p-0.5 rounded-lg bg-white/5">
         {(["yx", "zx", "zy"] as const).map((o) => (
           <OrientationButton
@@ -436,7 +431,6 @@ export function ViewerControls({
 
       <div className="w-px h-5 bg-white/10" />
 
-      {/* Axis controls */}
       <div className="flex items-center gap-1.5">
         {batchDims.map((dimSize, idx) => (
           <AxisChip
@@ -460,7 +454,6 @@ export function ViewerControls({
 
       <div className="w-px h-5 bg-white/10" />
 
-      {/* Windowing controls */}
       <WindowingControls
         vmin={vmin}
         vmax={vmax}

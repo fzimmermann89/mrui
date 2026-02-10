@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { fetchSlice } from "@/api/client";
+import { fetchSlice, fetchWindowStats } from "@/api/client";
 import type { Orientation } from "@/types";
 import { ReglCanvas } from "./ReglCanvas";
 import { ViewerControls } from "./ViewerControls";
@@ -16,8 +16,7 @@ interface SliceEntry {
   index: number;
   width: number;
   height: number;
-  dtype: "float32" | "uint16";
-  data: Float32Array | Uint16Array;
+  data: Float32Array;
 }
 
 interface InflightEntry {
@@ -26,17 +25,6 @@ interface InflightEntry {
 }
 
 const SLICE_CACHE_SIZE = 7;
-
-function computePercentiles(
-  data: Float32Array | Uint16Array,
-  p1: number,
-  p2: number
-): [number, number] {
-  const sorted = Array.from(data).sort((a, b) => a - b);
-  const i1 = Math.floor((sorted.length - 1) * p1);
-  const i2 = Math.floor((sorted.length - 1) * p2);
-  return [sorted[i1] ?? 0, sorted[i2] ?? 1];
-}
 
 function touchLru<K, V>(map: Map<K, V>, key: K): V | undefined {
   const value = map.get(key);
@@ -67,7 +55,6 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
   const inflightRef = useRef<Map<string, InflightEntry>>(new Map());
   const contextTokenRef = useRef(0);
   const targetIndexRef = useRef(0);
-  const autoWindowContextRef = useRef<string | null>(null);
 
   const getScrollAxis = useCallback(
     (orient: Orientation): { axis: "z" | "y" | "x"; max: number } => {
@@ -143,8 +130,7 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
             index,
             width: metadata.shape[1],
             height: metadata.shape[0],
-            dtype: "float32",
-            data: data instanceof Uint16Array ? Float32Array.from(data) : data,
+            data,
           };
           cacheSlice(entry);
           return entry;
@@ -160,17 +146,6 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
       return promise;
     },
     [batchIndices, cacheSlice, getScrollAxis, jobId, makeSliceKey, orientation]
-  );
-
-  const applyAutoWindowIfNeeded = useCallback(
-    (entry: SliceEntry) => {
-      if (autoWindowContextRef.current === contextKey) return;
-      const [p1, p99] = computePercentiles(entry.data, 0.01, 0.99);
-      setVmin(p1);
-      setVmax(p99);
-      autoWindowContextRef.current = contextKey;
-    },
-    [contextKey]
   );
 
   const requestSliceSet = useCallback(
@@ -200,7 +175,6 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
       if (cachedTarget) {
         setDisplayedSlice(cachedTarget);
         setIsLoading(false);
-        applyAutoWindowIfNeeded(cachedTarget);
       }
 
       // Load target slice first (highest priority)
@@ -209,7 +183,6 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
         if (targetEntry && targetIndex === targetIndexRef.current && token === contextTokenRef.current) {
           setDisplayedSlice(targetEntry);
           setIsLoading(false);
-          applyAutoWindowIfNeeded(targetEntry);
         }
       } catch (err) {
         if (token === contextTokenRef.current && targetIndex === targetIndexRef.current) {
@@ -223,35 +196,54 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
       const neighbors = prefetchOrder.slice(1);
       await Promise.allSettled(neighbors.map((idx) => loadSlice(idx, token)));
     },
-    [applyAutoWindowIfNeeded, getScrollAxis, loadSlice, makeSliceKey, orientation]
+    [getScrollAxis, loadSlice, makeSliceKey, orientation]
   );
 
   useEffect(() => {
     contextTokenRef.current += 1;
+    const token = contextTokenRef.current;
     clearTransientState();
     setError(null);
     setIsLoading(true);
     setDisplayedSlice(null);
-    autoWindowContextRef.current = null;
     void requestSliceSet(0);
+
+    const controller = new AbortController();
+    void fetchWindowStats(jobId, batchIndices, controller.signal)
+      .then((stats) => {
+        if (contextTokenRef.current !== token) return;
+        setVmin(stats.p01);
+        setVmax(stats.p99);
+      })
+      .catch(() => {
+        // window stats are best-effort; slice loading handles real errors
+      });
+
     return () => {
+      controller.abort();
       clearTransientState();
     };
-  }, [contextKey, clearTransientState, requestSliceSet]);
+  }, [contextKey, clearTransientState, requestSliceSet, jobId, batchIndices]);
 
   useEffect(() => {
-    const scrollInfo = getScrollAxis(orientation);
-    const clampedIndex = Math.max(0, Math.min(sliceIndex, scrollInfo.max - 1));
-    if (clampedIndex !== sliceIndex) {
-      setSliceIndex(clampedIndex);
-      return;
-    }
-    void requestSliceSet(clampedIndex);
-  }, [sliceIndex, orientation, getScrollAxis, requestSliceSet]);
+    void requestSliceSet(sliceIndex);
+  }, [sliceIndex, requestSliceSet]);
 
-  useEffect(() => {
-    setSliceIndex(0);
-  }, [orientation]);
+  const handleOrientationChange = useCallback(
+    (o: Orientation) => {
+      setOrientation(o);
+      setSliceIndex(0);
+    },
+    []
+  );
+
+  const setSliceIndexClamped = useCallback(
+    (next: number) => {
+      const { max } = getScrollAxis(orientation);
+      setSliceIndex(Math.max(0, Math.min(next, max - 1)));
+    },
+    [getScrollAxis, orientation]
+  );
 
   const handleOdometerScroll = useCallback(
     (delta: number) => {
@@ -285,10 +277,10 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
         const nextSlice = newValues[newValues.length - 1];
         const batchChanged = nextBatch.some((value, index) => value !== batchIndices[index]);
         if (batchChanged) setBatchIndices(nextBatch);
-        setSliceIndex(nextSlice);
+        setSliceIndexClamped(nextSlice);
       });
     },
-    [batchDims, batchIndices, getScrollAxis, orientation, sliceIndex]
+    [batchDims, batchIndices, getScrollAxis, orientation, sliceIndex, setSliceIndexClamped]
   );
 
   const handleAxisScroll = useCallback(
@@ -311,29 +303,23 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
           return;
         }
 
-        setSliceIndex((previous) =>
-          Math.max(0, Math.min(previous + (delta > 0 ? 1 : -1), scrollInfo.max - 1))
-        );
+        setSliceIndexClamped(sliceIndex + (delta > 0 ? 1 : -1));
       });
     },
-    [batchDims, batchIndices, getScrollAxis, orientation]
+    [batchDims, batchIndices, getScrollAxis, orientation, sliceIndex, setSliceIndexClamped]
   );
 
   const handleAxisValueChange = useCallback(
     (axisIndex: number, value: number) => {
-      const scrollInfo = getScrollAxis(orientation);
-      const scrollMaxes = [...batchDims, scrollInfo.max];
-      const clamped = Math.max(0, Math.min(value, scrollMaxes[axisIndex] - 1));
-
       if (axisIndex < batchDims.length) {
         const next = [...batchIndices];
-        next[axisIndex] = clamped;
+        next[axisIndex] = Math.max(0, Math.min(value, batchDims[axisIndex] - 1));
         setBatchIndices(next);
       } else {
-        setSliceIndex(clamped);
+        setSliceIndexClamped(value);
       }
     },
-    [batchDims, batchIndices, getScrollAxis, orientation]
+    [batchDims, batchIndices, setSliceIndexClamped]
   );
 
   if (isLoading) {
@@ -367,34 +353,29 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
 
   return (
     <div className="h-full relative gradient-mesh">
-      {/* Corner metadata - top left */}
       <div className="absolute top-4 left-4 z-10 pointer-events-none">
         <div className="text-[10px] font-mono text-[var(--color-muted-foreground)] opacity-70">
           {dimensionLabel}
         </div>
       </div>
-      
-      {/* Corner metadata - top right */}
+
       <div className="absolute top-4 right-4 z-10 pointer-events-none">
         <div className="text-[10px] font-mono text-[var(--color-muted-foreground)] opacity-70">
           {sliceLabel}
         </div>
       </div>
-      
-      {/* Subtle vignette effect */}
+
       <div className="absolute inset-0 pointer-events-none" style={{
         background: "radial-gradient(ellipse at center, transparent 0%, rgba(0,0,0,0.4) 100%)",
         opacity: 0.3,
       }} />
-      
-      {/* Canvas container with subtle border glow */}
+
       <div className="absolute inset-4 bottom-20 rounded-lg overflow-hidden ring-1 ring-white/5">
         {displayedSlice && (
           <ReglCanvas
             sliceData={displayedSlice.data}
             width={displayedSlice.width}
             height={displayedSlice.height}
-            sliceDtype={displayedSlice.dtype}
             sliceIndex={displayedSlice.index}
             vmin={vmin}
             vmax={vmax}
@@ -406,7 +387,7 @@ export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
 
       <ViewerControls
         orientation={orientation}
-        onOrientationChange={setOrientation}
+        onOrientationChange={handleOrientationChange}
         batchDims={batchDims}
         batchIndices={batchIndices}
         spatialScrollAxis={scrollInfo.axis}

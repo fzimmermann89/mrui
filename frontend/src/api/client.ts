@@ -10,9 +10,8 @@ import type {
 
 export interface SliceMetadata {
   shape: [number, number];
-  dtype: "float32" | "uint16";
+  dtype: "float32";
   order: string;
-  endianness: string;
   batchIndex: number[];
   orientation: "yx" | "zx" | "zy";
   sliceIndex: number;
@@ -75,7 +74,7 @@ async function deleteJob(jobId: string): Promise<void> {
 export async function fetchVolume(
   jobId: string,
   batchIndices: number[]
-): Promise<{ data: Float32Array | Uint16Array; metadata: VolumeMetadata }> {
+): Promise<{ data: Float32Array; metadata: VolumeMetadata }> {
   const batchParam = batchIndices.length > 0 ? batchIndices.join(",") : "";
   const url = `${API_BASE}/jobs/${jobId}/volume${batchParam ? `?batch=${batchParam}` : ""}`;
 
@@ -86,19 +85,16 @@ export async function fetchVolume(
   }
 
   const shapeHeader = res.headers.get("X-Volume-Shape") || "";
-  const dtype = res.headers.get("X-Dtype") || "float32";
   const order = res.headers.get("X-Order") || "C";
-  const endianness = res.headers.get("X-Endianness") || "little";
   const batchIndexHeader = res.headers.get("X-Batch-Index") || "";
 
   const buffer = await res.arrayBuffer();
-  const data = dtype === "uint16" ? new Uint16Array(buffer) : new Float32Array(buffer);
+  const data = new Float32Array(buffer);
 
   const metadata: VolumeMetadata = {
     shape: shapeHeader.split(",").map(Number).filter((n) => !isNaN(n)),
-    dtype,
+    dtype: "float32",
     order,
-    endianness,
     batchIndex: batchIndexHeader
       .split(",")
       .map(Number)
@@ -114,7 +110,7 @@ export async function fetchSlice(
   index: number,
   batchIndices: number[],
   signal?: AbortSignal
-): Promise<{ data: Float32Array | Uint16Array; metadata: SliceMetadata }> {
+): Promise<{ data: Float32Array; metadata: SliceMetadata }> {
   const params = new URLSearchParams();
   params.set("orientation", orientation);
   params.set("index", String(index));
@@ -129,11 +125,7 @@ export async function fetchSlice(
   }
 
   const shapeHeader = res.headers.get("X-Slice-Shape") || "";
-  const dtypeHeader = (res.headers.get("X-Dtype") || "float32") as
-    | "float32"
-    | "uint16";
   const order = res.headers.get("X-Order") || "C";
-  const endianness = res.headers.get("X-Endianness") || "little";
   const batchIndexHeader = res.headers.get("X-Batch-Index") || "";
   const orientationHeader = (res.headers.get("X-Orientation") || "yx") as
     | "yx"
@@ -147,14 +139,12 @@ export async function fetchSlice(
   }
 
   const buffer = await res.arrayBuffer();
-  const data =
-    dtypeHeader === "uint16" ? new Uint16Array(buffer) : new Float32Array(buffer);
+  const data = new Float32Array(buffer);
 
   const metadata: SliceMetadata = {
     shape: [shape[0], shape[1]],
-    dtype: dtypeHeader,
+    dtype: "float32",
     order,
-    endianness,
     batchIndex: batchIndexHeader
       .split(",")
       .map(Number)
@@ -164,6 +154,29 @@ export async function fetchSlice(
   };
 
   return { data, metadata };
+}
+
+export interface WindowStats {
+  p01: number;
+  p99: number;
+}
+
+export async function fetchWindowStats(
+  jobId: string,
+  batchIndices: number[],
+  signal?: AbortSignal
+): Promise<WindowStats> {
+  const params = new URLSearchParams();
+  if (batchIndices.length > 0) {
+    params.set("batch", batchIndices.join(","));
+  }
+  const qs = params.toString();
+  const url = `${API_BASE}/jobs/${jobId}/window-stats${qs ? `?${qs}` : ""}`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    throw new Error("Failed to fetch window stats");
+  }
+  return res.json();
 }
 
 // Download result file
