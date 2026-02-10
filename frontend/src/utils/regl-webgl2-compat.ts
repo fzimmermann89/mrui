@@ -98,7 +98,7 @@ function wrapGLContext(
   gl: WebGL2RenderingContext,
   extensions: Record<string, unknown>,
 ): WebGL2RenderingContext {
-  (gl as Record<string, unknown>)[VERSION_PROPERTY] = 2;
+  (gl as unknown as Record<string, unknown>)[VERSION_PROPERTY] = 2;
 
   for (const name in gl2Extensions) {
     extensions[name.toLowerCase()] = gl2Extensions[name];
@@ -109,12 +109,12 @@ function wrapGLContext(
 
   // -- getExtension ----------------------------------------------------------
   const origGetExtension = gl.getExtension.bind(gl);
-  (gl as Record<string, unknown>).getExtension = (name: string) =>
+  (gl as unknown as Record<string, unknown>).getExtension = (name: string) =>
     extensions[name.toLowerCase()] ?? origGetExtension(name);
 
   // -- texImage2D ------------------------------------------------------------
   const origTexImage2D = gl.texImage2D.bind(gl);
-  (gl as Record<string, unknown>).texImage2D = function (
+  (gl as unknown as Record<string, unknown>).texImage2D = function (
     target: number,
     level: number,
     iformat: number,
@@ -159,7 +159,7 @@ function wrapGLContext(
   // REGL uses texSubImage2D for same-size texture updates. The format/type
   // must match what texImage2D created (e.g. RED+FLOAT for an R32F texture).
   const origTexSubImage2D = gl.texSubImage2D.bind(gl);
-  (gl as Record<string, unknown>).texSubImage2D = function (
+  (gl as unknown as Record<string, unknown>).texSubImage2D = function (
     target: number,
     level: number,
     xoff: number,
@@ -249,13 +249,14 @@ function wrapGLContext(
  * ```
  */
 export function overrideContextType<T>(
-  canvas: HTMLCanvasElement,
+  _canvas: HTMLCanvasElement,
   callback: () => T,
 ): T {
   const extensions: Record<string, unknown> = {};
   const origGetContext = HTMLCanvasElement.prototype.getContext;
 
   HTMLCanvasElement.prototype.getContext = function (
+    this: HTMLCanvasElement,
     _type: string,
     attrs?: WebGLContextAttributes,
   ) {
