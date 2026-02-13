@@ -3,13 +3,14 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import h5py
 import numpy as np
 from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from huey import SqliteHuey
+from mr2.data import IData
 from pydantic import BaseModel
 from starlette.middleware.gzip import GZipMiddleware
+import torch
 
 from pydantic import TypeAdapter
 
@@ -49,6 +50,56 @@ def _annotate_availability(job: Job, settings: Settings) -> Job:
             "result_available": result_path.exists(),
         }
     )
+
+
+def _resolve_batch_indices(batch: str | None, batch_dims: tuple[int, ...]) -> list[int]:
+    if not batch_dims:
+        return []
+
+    if batch is None:
+        return [0] * len(batch_dims)
+
+    parts = [part.strip() for part in batch.split(",") if part.strip()]
+    if len(parts) != len(batch_dims):
+        raise HTTPException(status_code=400, detail="invalid batch length")
+    try:
+        batch_indices = [int(part) for part in parts]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid batch indices") from exc
+
+    for idx, dim in zip(batch_indices, batch_dims, strict=True):
+        if idx < 0 or idx >= dim:
+            raise HTTPException(status_code=400, detail="batch index out of range")
+    return batch_indices
+
+
+def _load_rss_volume(job: Job, settings: Settings) -> tuple[Job, torch.Tensor]:
+    result_file = Path(settings.results_dir) / f"{job.id}.h5"
+    if not result_file.exists():
+        raise HTTPException(status_code=404, detail="result missing")
+
+    try:
+        idata = IData.from_mr2(result_file)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="failed to load result") from exc
+
+    result_shape = [int(dim) for dim in idata.shape]
+    if job.result_shape != result_shape:
+        job = job.model_copy(update={"result_shape": result_shape})
+        save_job(job, Path(settings.results_dir))
+
+    rss_volume = idata.rss(keepdim=False).detach().cpu().to(dtype=torch.float32).contiguous()
+    return job, rss_volume
+
+
+def _load_finished_job(job_id: str, settings: Settings) -> Job:
+    metadata_path = Path(settings.results_dir) / f"{job_id}.json"
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="job not found")
+    job = load_job(metadata_path)
+    if job.status != JobStatus.FINISHED:
+        raise HTTPException(status_code=409, detail="job not finished")
+    return job
 
 
 @api_router.get("/health", response_model=HealthResponse, operation_id="health")
@@ -233,46 +284,12 @@ def get_job_volume(
     batch: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    metadata_path = Path(settings.results_dir) / f"{job_id}.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="job not found")
-    job = load_job(metadata_path)
-    if job.status != JobStatus.FINISHED:
-        raise HTTPException(status_code=409, detail="job not finished")
-    if not job.result_shape:
-        raise HTTPException(status_code=404, detail="result metadata missing")
-
-    results_dir = Path(settings.results_dir)
-    result_file = results_dir / f"{job_id}.h5"
-    if not result_file.exists():
-        raise HTTPException(status_code=404, detail="result missing")
-
-    batch_dims = job.result_shape[:-3]
-    if batch_dims:
-        if batch is None:
-            batch_indices = [0] * len(batch_dims)
-        else:
-            parts = [part.strip() for part in batch.split(",") if part.strip()]
-            if len(parts) != len(batch_dims):
-                raise HTTPException(status_code=400, detail="invalid batch length")
-            try:
-                batch_indices = [int(part) for part in parts]
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="invalid batch indices") from exc
-        for idx, dim in zip(batch_indices, batch_dims, strict=True):
-            if idx < 0 or idx >= dim:
-                raise HTTPException(status_code=400, detail="batch index out of range")
-    else:
-        batch_indices = []
-
-    with h5py.File(result_file, "r") as handle:
-        dataset = handle[job.result_dataset]
-        if not isinstance(dataset, h5py.Dataset):
-            raise HTTPException(status_code=404, detail="result dataset missing")
-        selection = tuple(batch_indices) + (slice(None), slice(None), slice(None))
-        volume = np.asarray(dataset[selection])
-
-    volume = np.ascontiguousarray(volume, dtype=np.float32)
+    job = _load_finished_job(job_id, settings)
+    _, rss_volume = _load_rss_volume(job, settings)
+    batch_dims = tuple(int(dim) for dim in rss_volume.shape[:-3])
+    batch_indices = _resolve_batch_indices(batch, batch_dims)
+    selection = tuple(batch_indices) + (slice(None), slice(None), slice(None))
+    volume = rss_volume[selection].to(dtype=torch.float32).contiguous()
 
     headers = {
         "X-Volume-Shape": ",".join(str(dim) for dim in volume.shape),
@@ -281,7 +298,7 @@ def get_job_volume(
         "X-Batch-Index": ",".join(str(idx) for idx in batch_indices),
     }
     return Response(
-        content=volume.tobytes(order="C"),
+        content=volume.numpy().tobytes(order="C"),
         media_type="application/octet-stream",
         headers=headers,
     )
@@ -299,38 +316,16 @@ def get_job_slice(
     batch: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    metadata_path = Path(settings.results_dir) / f"{job_id}.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="job not found")
-    job = load_job(metadata_path)
-    if job.status != JobStatus.FINISHED:
-        raise HTTPException(status_code=409, detail="job not finished")
-    if not job.result_shape:
-        raise HTTPException(status_code=404, detail="result metadata missing")
+    job = _load_finished_job(job_id, settings)
 
     valid_orientations = {"yx", "zx", "zy"}
     if orientation not in valid_orientations:
         raise HTTPException(status_code=400, detail="invalid orientation")
 
-    batch_dims = job.result_shape[:-3]
-    if batch_dims:
-        if batch is None:
-            batch_indices = [0] * len(batch_dims)
-        else:
-            parts = [part.strip() for part in batch.split(",") if part.strip()]
-            if len(parts) != len(batch_dims):
-                raise HTTPException(status_code=400, detail="invalid batch length")
-            try:
-                batch_indices = [int(part) for part in parts]
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="invalid batch indices") from exc
-        for idx, dim in zip(batch_indices, batch_dims, strict=True):
-            if idx < 0 or idx >= dim:
-                raise HTTPException(status_code=400, detail="batch index out of range")
-    else:
-        batch_indices = []
-
-    z_size, y_size, x_size = job.result_shape[-3:]
+    _, rss_volume = _load_rss_volume(job, settings)
+    batch_dims = tuple(int(dim) for dim in rss_volume.shape[:-3])
+    batch_indices = _resolve_batch_indices(batch, batch_dims)
+    z_size, y_size, x_size = (int(dim) for dim in rss_volume.shape[-3:])
     if orientation == "yx":
         max_index = z_size
     elif orientation == "zx":
@@ -341,29 +336,16 @@ def get_job_slice(
     if index < 0 or index >= max_index:
         raise HTTPException(status_code=400, detail="slice index out of range")
 
-    result_file = Path(settings.results_dir) / f"{job_id}.h5"
-    if not result_file.exists():
-        raise HTTPException(status_code=404, detail="result missing")
+    prefix = tuple(batch_indices)
+    if orientation == "yx":
+        selection = prefix + (index, slice(None), slice(None))
+    elif orientation == "zx":
+        selection = prefix + (slice(None), index, slice(None))
+    else:
+        selection = prefix + (slice(None), slice(None), index)
+    slice_data = rss_volume[selection]
 
-    with h5py.File(result_file, "r") as handle:
-        dataset = handle[job.result_dataset]
-        if not isinstance(dataset, h5py.Dataset):
-            raise HTTPException(status_code=404, detail="result dataset missing")
-
-        prefix = tuple(batch_indices)
-        if orientation == "yx":
-            selection = prefix + (index, slice(None), slice(None))
-        elif orientation == "zx":
-            selection = prefix + (slice(None), index, slice(None))
-        else:
-            selection = prefix + (slice(None), slice(None), index)
-
-        slice_data = np.asarray(dataset[selection])
-
-    if slice_data.ndim != 2:
-        raise HTTPException(status_code=500, detail="slice extraction failed")
-
-    payload = np.ascontiguousarray(slice_data, dtype=np.float32)
+    payload = slice_data.to(dtype=torch.float32).contiguous()
 
     headers = {
         "X-Slice-Shape": ",".join(str(dim) for dim in payload.shape),
@@ -375,7 +357,7 @@ def get_job_slice(
     }
 
     return Response(
-        content=payload.tobytes(order="C"),
+        content=payload.numpy().tobytes(order="C"),
         media_type="application/octet-stream",
         headers=headers,
     )
@@ -396,45 +378,16 @@ def get_window_stats(
     batch: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> WindowStatsResponse:
-    metadata_path = Path(settings.results_dir) / f"{job_id}.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="job not found")
-    job = load_job(metadata_path)
-    if job.status != JobStatus.FINISHED:
-        raise HTTPException(status_code=409, detail="job not finished")
-    if not job.result_shape:
-        raise HTTPException(status_code=404, detail="result metadata missing")
+    job = _load_finished_job(job_id, settings)
+    _, rss_volume = _load_rss_volume(job, settings)
+    batch_dims = tuple(int(dim) for dim in rss_volume.shape[:-3])
+    batch_indices = _resolve_batch_indices(batch, batch_dims)
+    selection = tuple(batch_indices) + (slice(None), slice(None), slice(None))
+    volume = rss_volume[selection].to(dtype=torch.float32)
 
-    batch_dims = job.result_shape[:-3]
-    if batch_dims:
-        if batch is None:
-            batch_indices = [0] * len(batch_dims)
-        else:
-            parts = [part.strip() for part in batch.split(",") if part.strip()]
-            if len(parts) != len(batch_dims):
-                raise HTTPException(status_code=400, detail="invalid batch length")
-            try:
-                batch_indices = [int(part) for part in parts]
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail="invalid batch indices") from exc
-        for idx, dim in zip(batch_indices, batch_dims, strict=True):
-            if idx < 0 or idx >= dim:
-                raise HTTPException(status_code=400, detail="batch index out of range")
-    else:
-        batch_indices = []
-
-    result_file = Path(settings.results_dir) / f"{job_id}.h5"
-    if not result_file.exists():
-        raise HTTPException(status_code=404, detail="result missing")
-
-    with h5py.File(result_file, "r") as handle:
-        dataset = handle[job.result_dataset]
-        if not isinstance(dataset, h5py.Dataset):
-            raise HTTPException(status_code=404, detail="result dataset missing")
-        selection = tuple(batch_indices) + (slice(None), slice(None), slice(None))
-        volume = np.asarray(dataset[selection], dtype=np.float32)
-
-    p01, p99 = float(np.percentile(volume, 1)), float(np.percentile(volume, 99))
+    # Keep percentiles in NumPy: torch.quantile has known issues for large arrays in this path.
+    volume_np = volume.numpy()
+    p01, p99 = float(np.percentile(volume_np, 1)), float(np.percentile(volume_np, 99))
     return WindowStatsResponse(p01=p01, p99=p99)
 
 
@@ -481,12 +434,7 @@ def download_job_result(
     format: DownloadFormat = DownloadFormat.H5,
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
-    metadata_path = Path(settings.results_dir) / f"{job_id}.json"
-    if not metadata_path.exists():
-        raise HTTPException(status_code=404, detail="job not found")
-    job = load_job(metadata_path)
-    if job.status != JobStatus.FINISHED:
-        raise HTTPException(status_code=409, detail="job not finished")
+    job = _load_finished_job(job_id, settings)
 
     results_dir = Path(settings.results_dir)
     result_file = results_dir / f"{job_id}.h5"
