@@ -35,7 +35,7 @@ function touchLru<K, V>(map: Map<K, V>, key: K): V | undefined {
 }
 
 export function VolumeViewer({ jobId, resultShape }: VolumeViewerProps) {
-  const batchDims = resultShape.slice(0, -3);
+  const batchDims = resultShape.slice(0, -4);
   const spatialDims = resultShape.slice(-3) as [number, number, number];
   const [zSize, ySize, xSize] = spatialDims;
 

@@ -236,6 +236,9 @@ export function JobDetail({ jobId }: JobDetailProps) {
                 <DropdownMenuItem asChild className="text-xs">
                   <a href={getDownloadUrl(jobId, "nii")} download>NIfTI</a>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild className="text-xs">
+                  <a href={getDownloadUrl(jobId, "dicom")} download>DICOM (zip)</a>
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -254,6 +257,11 @@ export function JobDetail({ jobId }: JobDetailProps) {
 
         {!showLogs && isFinished && hasResult && job.result_shape ? (
           <VolumeViewer jobId={jobId} resultShape={job.result_shape} />
+        ) : !showLogs && isFinished && hasResult && !job.result_shape ? (
+          <div className="h-full flex flex-col items-center justify-center text-[var(--color-muted-foreground)] gap-2">
+            <Loader2 className="h-6 w-6 animate-spin" />
+            <p className="text-sm">Preparing result...</p>
+          </div>
         ) : !showLogs && isFinished && !hasResult ? (
           <div className="h-full flex flex-col items-center justify-center text-[var(--color-muted-foreground)] gap-2">
             <AlertCircle className="h-6 w-6 opacity-40" />

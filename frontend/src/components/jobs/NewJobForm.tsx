@@ -70,6 +70,7 @@ export function NewJobForm({ onSuccess }: NewJobFormProps) {
   const selectedAlgorithm = useWatch({ control: methods.control, name: "algorithm" });
   const selectedParams = useWatch({ control: methods.control, name: "params" });
   const algorithmInfo = algorithmsById.get(selectedAlgorithm);
+  const effectiveParams = selectedParams ?? algorithmInfo?.default_params;
   const algorithmUI = selectedAlgorithm ? ALGORITHM_UI[selectedAlgorithm] : undefined;
   const AlgorithmComponent = algorithmUI?.Form;
 
@@ -274,7 +275,7 @@ export function NewJobForm({ onSuccess }: NewJobFormProps) {
             )}
           </div>
 
-          {isPulseqSelected(selectedParams) && (
+          {isPulseqSelected(effectiveParams) && (
               <div className="space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-300">
                 <Label>Pulseq Sequence File (.seq)</Label>
                 <div
@@ -310,10 +311,10 @@ export function NewJobForm({ onSuccess }: NewJobFormProps) {
             type="submit"
             disabled={
               !file ||
-              !selectedParams ||
               !algorithmInfo ||
               createJob.isPending ||
-              (isPulseqSelected(selectedParams) && !pulseqFile)
+              !effectiveParams ||
+              (isPulseqSelected(effectiveParams) && !pulseqFile)
             }
             className="w-full"
           >

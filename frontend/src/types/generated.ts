@@ -11,7 +11,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Health */
+        /**
+         * Health
+         * @description Return API health status.
+         */
         get: operations["health"];
         put?: never;
         post?: never;
@@ -28,7 +31,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Algorithms */
+        /**
+         * List Algorithms
+         * @description Return available reconstruction algorithms and their default params.
+         */
         get: operations["list_algorithms"];
         put?: never;
         post?: never;
@@ -45,10 +51,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Jobs */
+        /**
+         * List Jobs
+         * @description List all jobs with current availability and queue-revocation status.
+         */
         get: operations["list_jobs"];
         put?: never;
-        /** Create Job */
+        /**
+         * Create Job
+         * @description Create a reconstruction job, persist metadata, and enqueue background work.
+         */
         post: operations["create_job"];
         delete?: never;
         options?: never;
@@ -63,11 +75,17 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Job Detail */
+        /**
+         * Get Job Detail
+         * @description Return details for a single job.
+         */
         get: operations["get_job_detail"];
         put?: never;
         post?: never;
-        /** Delete Job Endpoint */
+        /**
+         * Delete Job Endpoint
+         * @description Delete a terminal-state job and its associated files.
+         */
         delete: operations["delete_job"];
         options?: never;
         head?: never;
@@ -81,7 +99,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Job Volume */
+        /**
+         * Get Job Volume
+         * @description Return one RSS volume as raw float32 bytes for the requested batch index.
+         */
         get: operations["get_job_volume"];
         put?: never;
         post?: never;
@@ -98,7 +119,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Job Slice */
+        /**
+         * Get Job Slice
+         * @description Return one 2D RSS slice as raw float32 bytes for the requested orientation.
+         */
         get: operations["get_job_slice"];
         put?: never;
         post?: never;
@@ -115,7 +139,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Get Window Stats */
+        /**
+         * Get Window Stats
+         * @description Return p01/p99 windowing statistics for the selected RSS volume.
+         */
         get: operations["get_window_stats"];
         put?: never;
         post?: never;
@@ -134,7 +161,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Abort Job */
+        /**
+         * Abort Job
+         * @description Abort a queued or running job and persist cancel metadata.
+         */
         post: operations["abort_job"];
         delete?: never;
         options?: never;
@@ -149,7 +179,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download Job Result */
+        /**
+         * Download Job Result
+         * @description Download a finished reconstruction result file.
+         */
         get: operations["download_job_result"];
         put?: never;
         post?: never;
@@ -166,7 +199,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download Job Input */
+        /**
+         * Download Job Input
+         * @description Download the original uploaded input file for a job.
+         */
         get: operations["download_job_input"];
         put?: never;
         post?: never;
@@ -254,7 +290,7 @@ export interface components {
          * @description Available download formats.
          * @enum {string}
          */
-        DownloadFormat: "npy" | "nii" | "h5";
+        DownloadFormat: "npy" | "nii" | "h5" | "dicom";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -289,8 +325,6 @@ export interface components {
             created_at: string;
             /** Input Filename */
             input_filename: string;
-            /** Result Dataset */
-            result_dataset: string;
             /**
              * Input Available
              * @default true
@@ -339,6 +373,11 @@ export interface components {
              * @enum {string}
              */
             algorithm: "sense";
+            /**
+             * Regularization
+             * @default 0.01
+             */
+            regularization: number;
             /**
              * Iterations
              * @default 10
