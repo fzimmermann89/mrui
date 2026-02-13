@@ -28,9 +28,9 @@ def _build_frontend_command() -> list[str]:
     return ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 
-def _build_api_command() -> list[str]:
+def _build_api_command(*, dev_mode: bool) -> list[str]:
     worker_count = os.getenv("MRUI_API_WORKERS", "1")
-    return [
+    command = [
         "uv",
         "run",
         "uvicorn",
@@ -39,9 +39,23 @@ def _build_api_command() -> list[str]:
         os.getenv("MRUI_HOST", "0.0.0.0"),
         "--port",
         os.getenv("MRUI_PORT", "8000"),
-        "--workers",
-        worker_count,
     ]
+    if dev_mode:
+        command.extend(
+            [
+                "--reload",
+                "--reload-dir",
+                "mrui",
+            ]
+        )
+        return command
+    command.extend(
+        [
+            "--workers",
+            worker_count,
+        ]
+    )
+    return command
 
 
 def _build_worker_command() -> list[str]:
@@ -68,11 +82,12 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = Path(__file__).resolve().parents[1]
     backend_dir = repo_root
     frontend_dir = repo_root / "frontend"
+    dev_mode = args.mode == "dev"
 
     processes: dict[str, subprocess.Popen[bytes]] = {}
-    processes["api"] = _spawn("api", _build_api_command(), backend_dir)
+    processes["api"] = _spawn("api", _build_api_command(dev_mode=dev_mode), backend_dir)
     processes["worker"] = _spawn("worker", _build_worker_command(), backend_dir)
-    if args.mode == "dev":
+    if dev_mode:
         processes["frontend"] = _spawn("frontend", _build_frontend_command(), frontend_dir)
 
     stopping = False
