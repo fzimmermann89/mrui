@@ -704,8 +704,8 @@ wheels = [
 ]
 
 [[package]]
-name = "mrpro"
-version = "0.260204"
+name = "mrtwo"
+version = "0.260212"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cufinufft", marker = "sys_platform == 'linux'" },
@@ -725,9 +725,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/d7/971ea005b4bedb020cdaa1fb4699fe5a04f69fbf02658252554845389dbd/mrpro-0.260204.tar.gz", hash = "sha256:6b286653fbcc1f63416575d533a5e77472af213d7e495430eefb6a6c2198583c", size = 220649 }
+sdist = { url = "https://files.pythonhosted.org/packages/04/bf/efd51a0aa902ac56d6349b8a2f76e88711b7259878f3dffc6d756169968f/mrtwo-0.260212.tar.gz", hash = "sha256:6a9d664896dd170bebdbaeefcbe1f1b37e8e741564cc52074d58e6ea6c2a5ce0", size = 259227 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/c0/4bde7c62cce1581f5b16d183b9f18be13c7ffaa818d100ae7b4b7c573e7a/mrpro-0.260204-py3-none-any.whl", hash = "sha256:869e476635e38aa03e8b8da18059c0e1b9ddcca5139b5a41a8a61cc9ea947a11", size = 284111 },
+    { url = "https://files.pythonhosted.org/packages/ac/45/bfdd2affb2ad5f08a9e6d29dea29dbe4394ff49a1546fe75b8f344bd1f3d/mrtwo-0.260212-py3-none-any.whl", hash = "sha256:4c42436d03e367f6d4ca1f3efeb5506441dbd8124d508b0b814383e0e9a50f36", size = 346807 },
 ]
 
 [[package]]
@@ -738,7 +738,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "h5py" },
     { name = "huey" },
-    { name = "mrpro" },
+    { name = "mrtwo" },
     { name = "numpy" },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
@@ -758,7 +758,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.128.1" },
     { name = "h5py", specifier = ">=3.11.0" },
     { name = "huey", specifier = ">=2.5.3" },
-    { name = "mrpro" },
+    { name = "mrtwo" },
     { name = "numpy", specifier = ">=2.1.0" },
     { name = "pydantic-settings", specifier = ">=2.12.0" },
     { name = "python-multipart", specifier = ">=0.0.22" },
@@ -1552,6 +1552,8 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
+    { url = "https://files.pythonhosted.org/packages/d3/54/a2ba279afcca44bbd320d4e73675b282fcee3d81400ea1b53934efca6462/torch-2.10.0-2-cp312-none-macosx_11_0_arm64.whl", hash = "sha256:13ec4add8c3faaed8d13e0574f5cd4a323c11655546f91fbe6afa77b57423574", size = 79498202 },
+    { url = "https://files.pythonhosted.org/packages/ec/23/2c9fe0c9c27f7f6cb865abcea8a4568f29f00acaeadfc6a37f6801f84cb4/torch-2.10.0-2-cp313-none-macosx_11_0_arm64.whl", hash = "sha256:e521c9f030a3774ed770a9c011751fb47c4d12029a3d6522116e48431f2ff89e", size = 79498254 },
     { url = "https://files.pythonhosted.org/packages/cc/af/758e242e9102e9988969b5e621d41f36b8f258bb4a099109b7a4b4b50ea4/torch-2.10.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:5fd4117d89ffd47e3dcc71e71a22efac24828ad781c7e46aaaf56bf7f2796acf", size = 145996088 },
     { url = "https://files.pythonhosted.org/packages/23/8e/3c74db5e53bff7ed9e34c8123e6a8bfef718b2450c35eefab85bb4a7e270/torch-2.10.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:787124e7db3b379d4f1ed54dd12ae7c741c16a4d29b49c0226a89bea50923ffb", size = 915711952 },
     { url = "https://files.pythonhosted.org/packages/6e/01/624c4324ca01f66ae4c7cd1b74eb16fb52596dce66dbe51eff95ef9e7a4c/torch-2.10.0-cp312-cp312-win_amd64.whl", hash = "sha256:2c66c61f44c5f903046cc696d088e21062644cbe541c7f1c4eaae88b2ad23547", size = 113757972 },

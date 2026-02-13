@@ -100,7 +100,6 @@ def run_reconstruction_job(
         job_id=resolved_job_id,
         status=JobStatus.FINISHED,
         result_shape=result.result_shape,
-        result_dataset=result.result_dataset,
         error=None,
         log_messages=log_messages,
     )

@@ -1,7 +1,7 @@
 from typing import Literal
 
-from mrpro.algorithms.reconstruction import DirectReconstruction
-from mrpro.data import IData, KData
+from mr2.algorithms.reconstruction import DirectReconstruction
+from mr2.data import IData, KData
 
 from mrui.algorithms.base import (
     AlgorithmId,

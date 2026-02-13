@@ -76,7 +76,6 @@ def update_job(
     job_id: str,
     status: JobStatus | None = None,
     result_shape: tuple[int, ...] | None = None,
-    result_dataset: str | None = None,
     error: str | None = None,
     log_messages: list[str] | None = None,
     queue_task_id: str | None = None,
@@ -94,8 +93,6 @@ def update_job(
         Optional status update.
     result_shape
         Optional result shape update.
-    result_dataset
-        Optional dataset name update.
     """
 
     metadata_path = job_metadata_path(results_dir, job_id)
@@ -105,8 +102,7 @@ def update_job(
     updated = job.model_copy(
         update={
             "status": status or job.status,
-            "result_shape": list(result_shape) if result_shape else job.result_shape,
-            "result_dataset": result_dataset or job.result_dataset,
+            "result_shape": list(result_shape) if result_shape is not None else job.result_shape,
             "error": error if error is not None else job.error,
             "log_messages": log_messages if log_messages is not None else job.log_messages,
             "queue_task_id": queue_task_id if queue_task_id is not None else job.queue_task_id,

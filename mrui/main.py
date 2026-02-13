@@ -1,4 +1,6 @@
 import json
+import shutil
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,17 +11,30 @@ from fastapi.responses import FileResponse, Response
 from huey import SqliteHuey
 from mr2.data import IData
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 from starlette.middleware.gzip import GZipMiddleware
 import torch
 
 from pydantic import TypeAdapter
 
 from mrui.algorithms import list_algorithms as list_algorithm_specs
-from mrui.algorithms.base import AlgorithmId, AlgorithmParamsBase, DownloadFormat, TrajectoryCalculator
+from mrui.algorithms.base import (
+    AlgorithmId,
+    AlgorithmParamsBase,
+    DownloadFormat,
+    TrajectoryCalculator,
+)
 from mrui.deps import get_huey, get_settings
 from mrui.job_status import JobStatus
 from mrui.jobs import run_reconstruction_job_task
-from mrui.models import AlgorithmInfo, AlgorithmParams, AlgorithmsResponse, CreateJobResponse, Job, JobsListResponse
+from mrui.models import (
+    AlgorithmInfo,
+    AlgorithmParams,
+    AlgorithmsResponse,
+    CreateJobResponse,
+    Job,
+    JobsListResponse,
+)
 from mrui.settings import Settings
 from mrui.storage import (
     delete_job,
@@ -34,12 +49,11 @@ class HealthResponse(BaseModel):
     status: str
 
 
-
-
 api_router = APIRouter(prefix="/api")
 
 
 def _annotate_availability(job: Job, settings: Settings) -> Job:
+    """Annotate a job with input/result file availability flags."""
     inputs_dir = Path(settings.inputs_dir)
     results_dir = Path(settings.results_dir)
     input_path = inputs_dir / f"{job.id}_{job.input_filename}"
@@ -53,6 +67,7 @@ def _annotate_availability(job: Job, settings: Settings) -> Job:
 
 
 def _resolve_batch_indices(batch: str | None, batch_dims: tuple[int, ...]) -> list[int]:
+    """Parse and validate batch indices against the available batch dimensions."""
     if not batch_dims:
         return []
 
@@ -74,6 +89,7 @@ def _resolve_batch_indices(batch: str | None, batch_dims: tuple[int, ...]) -> li
 
 
 def _load_rss_volume(job: Job, settings: Settings) -> tuple[Job, torch.Tensor]:
+    """Load MR2 result data, persist full shape metadata, and return RSS volume."""
     result_file = Path(settings.results_dir) / f"{job.id}.h5"
     if not result_file.exists():
         raise HTTPException(status_code=404, detail="result missing")
@@ -83,16 +99,19 @@ def _load_rss_volume(job: Job, settings: Settings) -> tuple[Job, torch.Tensor]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail="failed to load result") from exc
 
-    result_shape = [int(dim) for dim in idata.shape]
+    result_shape = list(idata.shape)
     if job.result_shape != result_shape:
         job = job.model_copy(update={"result_shape": result_shape})
         save_job(job, Path(settings.results_dir))
 
-    rss_volume = idata.rss(keepdim=False).detach().cpu().to(dtype=torch.float32).contiguous()
+    rss_volume = (
+        idata.rss(keepdim=False).detach().cpu().to(dtype=torch.float32).contiguous()
+    )
     return job, rss_volume
 
 
 def _load_finished_job(job_id: str, settings: Settings) -> Job:
+    """Load a job and ensure it exists and is finished."""
     metadata_path = Path(settings.results_dir) / f"{job_id}.json"
     if not metadata_path.exists():
         raise HTTPException(status_code=404, detail="job not found")
@@ -102,8 +121,49 @@ def _load_finished_job(job_id: str, settings: Settings) -> Job:
     return job
 
 
+def _ensure_result_shape(job: Job, settings: Settings) -> Job:
+    """Populate missing result shape metadata from the stored MR2 result file."""
+    if job.result_shape is not None:
+        return job
+
+    result_file = Path(settings.results_dir) / f"{job.id}.h5"
+    if not result_file.exists():
+        return job
+
+    try:
+        idata = IData.from_mr2(result_file)
+    except Exception:
+        return job
+
+    result_shape = list(idata.shape)
+    if job.result_shape != result_shape:
+        job = job.model_copy(update={"result_shape": result_shape})
+        save_job(job, Path(settings.results_dir))
+    return job
+
+
+def _cancel_if_revoked(job: Job, results_dir: Path, huey: SqliteHuey) -> Job:
+    """Mark queued jobs as canceled if their queue task has been revoked."""
+    if (
+        job.status == JobStatus.QUEUED
+        and job.queue_task_id
+        and huey.is_revoked(job.queue_task_id)
+    ):
+        job = job.model_copy(
+            update={"status": JobStatus.CANCELED, "error": "Aborted by user"}
+        )
+        save_job(job, results_dir)
+    return job
+
+
+def _cleanup_temp_dir(path: Path) -> None:
+    """Remove a temporary export directory and all of its contents."""
+    shutil.rmtree(path, ignore_errors=True)
+
+
 @api_router.get("/health", response_model=HealthResponse, operation_id="health")
 def health() -> HealthResponse:
+    """Return API health status."""
     return HealthResponse(status="ok")
 
 
@@ -113,6 +173,7 @@ def health() -> HealthResponse:
     operation_id="list_algorithms",
 )
 def list_algorithms() -> AlgorithmsResponse:
+    """Return available reconstruction algorithms and their default params."""
     algorithms: list[AlgorithmInfo] = []
     for algorithm in list_algorithm_specs():
         default_params: AlgorithmParams = TypeAdapter(AlgorithmParams).validate_python(
@@ -138,6 +199,7 @@ def create_job(
     params: str | None = Form(None),
     settings: Settings = Depends(get_settings),
 ) -> CreateJobResponse:
+    """Create a reconstruction job, persist metadata, and enqueue background work."""
     job_id = str(uuid.uuid4())
     inputs_dir = Path(settings.inputs_dir)
     results_dir = Path(settings.results_dir)
@@ -171,19 +233,26 @@ def create_job(
     if params_model.algorithm != algorithm:
         raise HTTPException(status_code=400, detail="algorithm mismatch")
     if pulseq_file is not None and not isinstance(params_model, AlgorithmParamsBase):
-        raise HTTPException(status_code=400, detail="pulseq_file is not supported for this algorithm")
+        raise HTTPException(
+            status_code=400, detail="pulseq_file is not supported for this algorithm"
+        )
     if (
         isinstance(params_model, AlgorithmParamsBase)
         and params_model.trajectory_calculator == TrajectoryCalculator.PYPULSEQ
         and pulseq_file is None
     ):
-        raise HTTPException(status_code=400, detail="pulseq_file is required for pypulseq trajectory")
+        raise HTTPException(
+            status_code=400, detail="pulseq_file is required for pypulseq trajectory"
+        )
     if (
         isinstance(params_model, AlgorithmParamsBase)
         and params_model.trajectory_calculator != TrajectoryCalculator.PYPULSEQ
         and pulseq_file is not None
     ):
-        raise HTTPException(status_code=400, detail="pulseq_file can only be set with pypulseq trajectory")
+        raise HTTPException(
+            status_code=400,
+            detail="pulseq_file can only be set with pypulseq trajectory",
+        )
 
     try:
         with input_path.open("wb") as output_handle:
@@ -212,10 +281,10 @@ def create_job(
             DownloadFormat.NPY,
             DownloadFormat.NII,
             DownloadFormat.H5,
+            DownloadFormat.DICOM,
         ],
         created_at=datetime.now(tz=timezone.utc),
         input_filename=input_filename,
-        result_dataset="data",
         input_available=True,
         result_available=False,
         log_messages=[],
@@ -227,7 +296,9 @@ def create_job(
         algorithm_id=algorithm.value,
         input_path=str(input_path),
         output_path=str(output_path),
-        params_payload=TypeAdapter(AlgorithmParams).dump_python(params_model, mode="json"),
+        params_payload=TypeAdapter(AlgorithmParams).dump_python(
+            params_model, mode="json"
+        ),
     )
     job = job.model_copy(update={"queue_task_id": task.id})
     save_job(job, results_dir)
@@ -240,12 +311,12 @@ def list_jobs(
     settings: Settings = Depends(get_settings),
     huey: SqliteHuey = Depends(get_huey),
 ) -> JobsListResponse:
+    """List all jobs with current availability and queue-revocation status."""
     jobs = list_jobs_from_disk(Path(settings.results_dir))
+    results_dir = Path(settings.results_dir)
     updated_jobs: list[Job] = []
     for job in jobs:
-        if job.status == JobStatus.QUEUED and job.queue_task_id and huey.is_revoked(job.queue_task_id):
-            job = job.model_copy(update={"status": JobStatus.CANCELED, "error": "Aborted by user"})
-            save_job(job, Path(settings.results_dir))
+        job = _cancel_if_revoked(job, results_dir, huey)
         updated_jobs.append(_annotate_availability(job, settings))
     return JobsListResponse(jobs=updated_jobs)
 
@@ -260,6 +331,7 @@ def get_job_detail(
     settings: Settings = Depends(get_settings),
     huey: SqliteHuey = Depends(get_huey),
 ) -> Job:
+    """Return details for a single job."""
     results_dir = Path(settings.results_dir)
     metadata_path = results_dir / f"{job_id}.json"
     if not metadata_path.exists():
@@ -267,9 +339,11 @@ def get_job_detail(
 
     job = load_job(metadata_path)
 
-    if job.status == JobStatus.QUEUED and job.queue_task_id and huey.is_revoked(job.queue_task_id):
-        job = job.model_copy(update={"status": JobStatus.CANCELED, "error": "Aborted by user"})
-        save_job(job, results_dir)
+    job = _cancel_if_revoked(job, results_dir, huey)
+    if job.status == JobStatus.FINISHED:
+        job = _ensure_result_shape(job, settings)
+        if job.result_available and job.result_shape is None:
+            job, _ = _load_rss_volume(job, settings)
 
     return _annotate_availability(job, settings)
 
@@ -284,10 +358,10 @@ def get_job_volume(
     batch: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> Response:
+    """Return one RSS volume as raw float32 bytes for the requested batch index."""
     job = _load_finished_job(job_id, settings)
     _, rss_volume = _load_rss_volume(job, settings)
-    batch_dims = tuple(int(dim) for dim in rss_volume.shape[:-3])
-    batch_indices = _resolve_batch_indices(batch, batch_dims)
+    batch_indices = _resolve_batch_indices(batch, rss_volume.shape[:-3])
     selection = tuple(batch_indices) + (slice(None), slice(None), slice(None))
     volume = rss_volume[selection].to(dtype=torch.float32).contiguous()
 
@@ -316,6 +390,7 @@ def get_job_slice(
     batch: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> Response:
+    """Return one 2D RSS slice as raw float32 bytes for the requested orientation."""
     job = _load_finished_job(job_id, settings)
 
     valid_orientations = {"yx", "zx", "zy"}
@@ -323,9 +398,9 @@ def get_job_slice(
         raise HTTPException(status_code=400, detail="invalid orientation")
 
     _, rss_volume = _load_rss_volume(job, settings)
-    batch_dims = tuple(int(dim) for dim in rss_volume.shape[:-3])
+    batch_dims = rss_volume.shape[:-3]
     batch_indices = _resolve_batch_indices(batch, batch_dims)
-    z_size, y_size, x_size = (int(dim) for dim in rss_volume.shape[-3:])
+    z_size, y_size, x_size = rss_volume.shape[-3:]
     if orientation == "yx":
         max_index = z_size
     elif orientation == "zx":
@@ -378,9 +453,10 @@ def get_window_stats(
     batch: str | None = None,
     settings: Settings = Depends(get_settings),
 ) -> WindowStatsResponse:
+    """Return p01/p99 windowing statistics for the selected RSS volume."""
     job = _load_finished_job(job_id, settings)
     _, rss_volume = _load_rss_volume(job, settings)
-    batch_dims = tuple(int(dim) for dim in rss_volume.shape[:-3])
+    batch_dims = rss_volume.shape[:-3]
     batch_indices = _resolve_batch_indices(batch, batch_dims)
     selection = tuple(batch_indices) + (slice(None), slice(None), slice(None))
     volume = rss_volume[selection].to(dtype=torch.float32)
@@ -401,6 +477,7 @@ def abort_job(
     settings: Settings = Depends(get_settings),
     huey: SqliteHuey = Depends(get_huey),
 ) -> Job:
+    """Abort a queued or running job and persist cancel metadata."""
     results_dir = Path(settings.results_dir)
     metadata_path = results_dir / f"{job_id}.json"
     if not metadata_path.exists():
@@ -419,7 +496,13 @@ def abort_job(
         huey.revoke_by_id(job.queue_task_id, revoke_once=True)
 
     next_status = JobStatus.CANCELED if job.status == JobStatus.QUEUED else job.status
-    job = job.model_copy(update={"status": next_status, "error": "Aborted by user", "cancel_requested": True})
+    job = job.model_copy(
+        update={
+            "status": next_status,
+            "error": "Aborted by user",
+            "cancel_requested": True,
+        }
+    )
     save_job(job, results_dir)
     return job
 
@@ -434,6 +517,7 @@ def download_job_result(
     format: DownloadFormat = DownloadFormat.H5,
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
+    """Download a finished reconstruction result file."""
     job = _load_finished_job(job_id, settings)
 
     results_dir = Path(settings.results_dir)
@@ -441,12 +525,59 @@ def download_job_result(
     if not result_file.exists():
         raise HTTPException(status_code=404, detail="result missing")
 
-    filename = f"{job.name}.{format.value}"
-    return FileResponse(
-        result_file,
-        filename=filename,
-        media_type="application/octet-stream",
-    )
+    if format == DownloadFormat.H5:
+        filename = f"{job.name}.h5"
+        return FileResponse(
+            result_file,
+            filename=filename,
+            media_type="application/octet-stream",
+        )
+
+    try:
+        idata = IData.from_mr2(result_file)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="failed to load result") from exc
+
+    export_dir = Path(tempfile.mkdtemp(prefix="mrui-export-"))
+
+    if format == DownloadFormat.NPY:
+        export_path = export_dir / f"{job.name}.npy"
+        np.save(export_path, idata.data.detach().cpu().numpy())
+        return FileResponse(
+            export_path,
+            filename=export_path.name,
+            media_type="application/octet-stream",
+            background=BackgroundTask(_cleanup_temp_dir, export_dir),
+        )
+
+    if format == DownloadFormat.NII:
+        export_path = export_dir / f"{job.name}.nii"
+        idata.to_nifti(export_path)
+        return FileResponse(
+            export_path,
+            filename=export_path.name,
+            media_type="application/octet-stream",
+            background=BackgroundTask(_cleanup_temp_dir, export_dir),
+        )
+
+    if format == DownloadFormat.DICOM:
+        dicom_dir = export_dir / "dicom"
+        idata.to_dicom_folder(dicom_dir, series_description=job.name)
+        zip_path = Path(
+            shutil.make_archive(
+                str(export_dir / f"{job.name}_dicom"),
+                "zip",
+                root_dir=dicom_dir,
+            )
+        )
+        return FileResponse(
+            zip_path,
+            filename=f"{job.name}.dicom.zip",
+            media_type="application/zip",
+            background=BackgroundTask(_cleanup_temp_dir, export_dir),
+        )
+
+    raise HTTPException(status_code=400, detail="unsupported download format")
 
 
 @api_router.get(
@@ -458,6 +589,7 @@ def download_job_input(
     job_id: str,
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
+    """Download the original uploaded input file for a job."""
     metadata_path = Path(settings.results_dir) / f"{job_id}.json"
     if not metadata_path.exists():
         raise HTTPException(status_code=404, detail="job not found")
@@ -482,6 +614,7 @@ def delete_job_endpoint(
     settings: Settings = Depends(get_settings),
     huey: SqliteHuey = Depends(get_huey),
 ) -> Response:
+    """Delete a terminal-state job and its associated files."""
     results_dir = Path(settings.results_dir)
     metadata_path = results_dir / f"{job_id}.json"
     if not metadata_path.exists():
@@ -489,7 +622,11 @@ def delete_job_endpoint(
 
     job = load_job(metadata_path)
     effective_status = job.status
-    if effective_status == JobStatus.QUEUED and job.queue_task_id and huey.is_revoked(job.queue_task_id):
+    if (
+        effective_status == JobStatus.QUEUED
+        and job.queue_task_id
+        and huey.is_revoked(job.queue_task_id)
+    ):
         effective_status = JobStatus.CANCELED
     if effective_status not in {
         JobStatus.FINISHED,

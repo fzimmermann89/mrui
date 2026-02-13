@@ -53,7 +53,6 @@ class Job(BaseModel):
     available_formats: list[DownloadFormat]
     created_at: datetime
     input_filename: str
-    result_dataset: str
     input_available: bool = True
     result_available: bool = True
     log_messages: list[str] = Field(default_factory=list)

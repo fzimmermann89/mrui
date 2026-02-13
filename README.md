@@ -1,7 +1,7 @@
 # <img src="frontend/public/logo.svg" width="32" vertical-align="middle"> MRui
 
 
-A web UI for running [MRpro](http://mrpro.rocks) reconstructions. Upload data, pick an algorithm, get results. Uses Huey for background jobs so you can queue up work and come back later.
+A web UI for running [MRtwo](https://github.com/fzimmermann89/mr2) reconstructions. Upload data, pick an algorithm, get results. Uses Huey for background jobs so you can queue up work and come back later.
 
 ## Quick start
 
